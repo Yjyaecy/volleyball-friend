@@ -1,0 +1,739 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>排球技术AI辅助教学</title>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  body {
+    font-family: -apple-system, 'Microsoft YaHei', 'PingFang SC', sans-serif;
+    background: #0D2B4E; color: #fff; min-height: 100vh;
+    display: flex; justify-content: center; align-items: center;
+  }
+  #app {
+    width: 100%; max-width: 480px; height: 100vh; max-height: 900px;
+    background: linear-gradient(180deg, #0D2B4E 0%, #1a3a5c 100%);
+    position: relative; overflow: hidden; display: flex; flex-direction: column;
+  }
+  /* 顶部栏 */
+  .topbar {
+    padding: 20px 20px 12px; display: flex; align-items: center;
+    justify-content: space-between;
+  }
+  .topbar h1 { font-size: 20px; font-weight: bold; }
+  .topbar .sub { font-size: 12px; color: #BBD7F0; margin-top: 2px; }
+  .badge {
+    background: #D4AF37; color: #0D2B4E; padding: 4px 10px;
+    border-radius: 12px; font-size: 11px; font-weight: bold;
+  }
+  /* 内容区 */
+  .content { flex: 1; overflow-y: auto; padding: 0 20px 90px; }
+  .content::-webkit-scrollbar { display: none; }
+  /* 卡片 */
+  .card {
+    background: rgba(255,255,255,0.06); border-radius: 16px;
+    padding: 16px; margin-bottom: 14px; border: 1px solid rgba(255,255,255,0.08);
+  }
+  .card-title {
+    font-size: 15px; font-weight: bold; color: #D4AF37;
+    margin-bottom: 12px; display: flex; align-items: center; gap: 6px;
+  }
+  /* 技术选择 */
+  .tech-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+  .tech-item {
+    background: rgba(255,255,255,0.06); border-radius: 12px;
+    padding: 12px 6px; text-align: center; cursor: pointer;
+    border: 2px solid transparent; transition: all 0.25s;
+  }
+  .tech-item.active { border-color: #D4AF37; background: rgba(212,175,55,0.15); }
+  .tech-item .icon { font-size: 24px; margin-bottom: 4px; }
+  .tech-item .name { font-size: 12px; color: #BBD7F0; }
+  .tech-item.active .name { color: #D4AF37; font-weight: bold; }
+  /* 上传区 */
+  .upload-box {
+    border: 2px dashed rgba(255,255,255,0.25); border-radius: 16px;
+    padding: 30px 16px; text-align: center; cursor: pointer;
+    transition: all 0.3s; margin-bottom: 14px;
+  }
+  .upload-box:hover { border-color: #D4AF37; background: rgba(212,175,55,0.08); }
+  .upload-box .icon { font-size: 40px; margin-bottom: 8px; }
+  .upload-box .text { font-size: 14px; color: #BBD7F0; }
+  .upload-box .hint { font-size: 11px; color: #6b8ba8; margin-top: 6px; }
+  /* 视频预览 */
+  .video-wrap { position: relative; border-radius: 12px; overflow: hidden; margin-bottom: 14px; display: none; }
+  .video-wrap video, .video-wrap canvas { width: 100%; display: block; }
+  .video-wrap canvas { position: absolute; top: 0; left: 0; }
+  /* 按钮 */
+  .btn {
+    width: 100%; padding: 14px; border: none; border-radius: 12px;
+    font-size: 16px; font-weight: bold; cursor: pointer;
+    transition: all 0.2s; margin-bottom: 10px;
+  }
+  .btn-primary {
+    background: linear-gradient(90deg, #D4AF37, #f0c75e); color: #0D2B4E;
+  }
+  .btn-primary:active { transform: scale(0.98); }
+  .btn-primary:disabled { opacity: 0.4; cursor: not-allowed; }
+  .btn-outline {
+    background: transparent; color: #BBD7F0; border: 1px solid rgba(255,255,255,0.2);
+  }
+  /* 分析中 */
+  .analyzing { display: none; text-align: center; padding: 30px 0; }
+  .analyzing.active { display: block; }
+  .spinner {
+    width: 44px; height: 44px; border: 3px solid rgba(212,175,55,0.25);
+    border-top-color: #D4AF37; border-radius: 50%; margin: 0 auto 14px;
+    animation: spin 0.9s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  /* 结果 */
+  .result { display: none; }
+  .result.active { display: block; }
+  .score-ring {
+    width: 130px; height: 130px; margin: 0 auto 16px;
+    border-radius: 50%; display: flex; align-items: center;
+    justify-content: center; position: relative;
+    background: conic-gradient(#D4AF37 var(--p), rgba(255,255,255,0.08) 0);
+  }
+  .score-ring::before {
+    content: ''; position: absolute; inset: 9px; border-radius: 50%;
+    background: #1a3a5c;
+  }
+  .score-ring .num {
+    position: relative; z-index: 1; font-size: 38px;
+    font-weight: bold; color: #D4AF37;
+  }
+  .score-label { text-align: center; color: #BBD7F0; font-size: 13px; margin-bottom: 18px; }
+  .metric-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 16px; }
+  .metric {
+    background: rgba(255,255,255,0.05); border-radius: 10px;
+    padding: 12px 6px; text-align: center;
+  }
+  .metric .val { font-size: 18px; font-weight: bold; color: #D4AF37; }
+  .metric .lbl { font-size: 11px; color: #8aa8c4; margin-top: 4px; }
+  .suggest {
+    background: rgba(255,255,255,0.05); border-radius: 10px;
+    padding: 12px 14px; margin-bottom: 8px; font-size: 13px;
+    line-height: 1.6; border-left: 3px solid #D4AF37;
+  }
+  .suggest.good { border-left-color: #4ade80; }
+  .suggest.warn { border-left-color: #f87171; }
+  /* 底部导航 */
+  .tabbar {
+    position: absolute; bottom: 0; left: 0; right: 0;
+    display: flex; background: rgba(13,43,78,0.98);
+    border-top: 1px solid rgba(255,255,255,0.08);
+    backdrop-filter: blur(10px);
+  }
+  .tab {
+    flex: 1; padding: 10px 0 14px; text-align: center;
+    cursor: pointer; transition: all 0.2s;
+  }
+  .tab .ico { font-size: 20px; margin-bottom: 3px; }
+  .tab .lbl { font-size: 11px; color: #6b8ba8; }
+  .tab.active .lbl { color: #D4AF37; font-weight: bold; }
+  .tab.active .ico { transform: scale(1.1); }
+  /* 页面切换 */
+  .page { display: none; }
+  .page.active { display: block; }
+  /* 学习资源 */
+  .resource-item {
+    display: flex; align-items: center; gap: 12px;
+    padding: 14px; background: rgba(255,255,255,0.05);
+    border-radius: 12px; margin-bottom: 10px; cursor: pointer;
+  }
+  .resource-item .ico {
+    width: 40px; height: 40px; border-radius: 10px;
+    background: rgba(212,175,55,0.15); display: flex;
+    align-items: center; justify-content: center; font-size: 20px;
+  }
+  .resource-item .info { flex: 1; }
+  .resource-item .title { font-size: 14px; font-weight: bold; margin-bottom: 3px; }
+  .resource-item .desc { font-size: 11px; color: #8aa8c4; }
+  /* 记录 */
+  .record-item {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 12px 14px; background: rgba(255,255,255,0.05);
+    border-radius: 10px; margin-bottom: 8px; font-size: 13px;
+  }
+  .record-item .score { color: #D4AF37; font-weight: bold; }
+  .empty { text-align: center; color: #6b8ba8; padding: 40px 0; font-size: 13px; }
+  /* 进度条 */
+  .progress-bar {
+    height: 8px; background: rgba(255,255,255,0.08);
+    border-radius: 4px; overflow: hidden; margin-top: 8px;
+  }
+  .progress-bar .fill {
+    height: 100%; background: linear-gradient(90deg, #D4AF37, #f0c75e);
+    border-radius: 4px; transition: width 0.5s;
+  }
+</style>
+</head>
+<body>
+<div id="app">
+
+  <!-- 顶部栏 -->
+  <div class="topbar">
+    <div>
+      <h1>🏐 排球AI教练</h1>
+      <div class="sub">沈阳建筑大学 · 公共体育排球课</div>
+    </div>
+    <div class="badge">AI辅助</div>
+  </div>
+
+  <!-- ========== 页面1：首页 ========== -->
+  <div class="content page active" id="page-home">
+    <!-- 学习进度 -->
+    <div class="card">
+      <div class="card-title">📊 本周学习进度</div>
+      <div style="display:flex;justify-content:space-between;font-size:13px;color:#BBD7F0;">
+        <span>课程进度</span><span id="progress-text">0 / 16 课时</span>
+      </div>
+      <div class="progress-bar"><div class="fill" id="progress-fill" style="width:0%"></div></div>
+      <div style="display:flex;gap:12px;margin-top:14px;">
+        <div class="metric" style="flex:1;">
+          <div class="val" id="stat-uploads">0</div>
+          <div class="lbl">视频分析</div>
+        </div>
+        <div class="metric" style="flex:1;">
+          <div class="val" id="stat-avg">--</div>
+          <div class="lbl">平均评分</div>
+        </div>
+        <div class="metric" style="flex:1;">
+          <div class="val" id="stat-best">--</div>
+          <div class="lbl">最高评分</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 快速入口 -->
+    <div class="card">
+      <div class="card-title">🎯 快速开始</div>
+      <div class="tech-grid">
+        <div class="tech-item active" onclick="selectTech('dig', this)">
+          <div class="icon">🤲</div><div class="name">垫球</div>
+        </div>
+        <div class="tech-item" onclick="selectTech('set', this)">
+          <div class="icon">🎯</div><div class="name">传球</div>
+        </div>
+        <div class="tech-item" onclick="selectTech('serve', this)">
+          <div class="icon">🚀</div><div class="name">发球</div>
+        </div>
+        <div class="tech-item" onclick="selectTech('spike', this)">
+          <div class="icon">💥</div><div class="name">扣球</div>
+        </div>
+      </div>
+      <button class="btn btn-primary" style="margin-top:14px;" onclick="switchTab('analyze')">
+        📹 上传视频开始分析
+      </button>
+    </div>
+
+    <!-- 技术要点 -->
+    <div class="card">
+      <div class="card-title">💡 今日技术要点</div>
+      <div class="suggest good">✅ 垫球：插、夹、提、蹬，四字要领要记牢</div>
+      <div class="suggest">💡 传球：手型半球形，击球点在额前上方20—30cm</div>
+      <div class="suggest">💡 发球：抛球稳、挥臂快、击球准</div>
+      <div class="suggest">💡 扣球：两步助跑、高点击球、全掌包球</div>
+    </div>
+  </div>
+
+  <!-- ========== 页面2：技术分析 ========== -->
+  <div class="content page" id="page-analyze">
+    <div class="card">
+      <div class="card-title">🎯 选择技术动作</div>
+      <div class="tech-grid" id="tech-grid-analyze">
+        <div class="tech-item active" onclick="selectTech('dig', this)">
+          <div class="icon">🤲</div><div class="name">垫球</div>
+        </div>
+        <div class="tech-item" onclick="selectTech('set', this)">
+          <div class="icon">🎯</div><div class="name">传球</div>
+        </div>
+        <div class="tech-item" onclick="selectTech('serve', this)">
+          <div class="icon">🚀</div><div class="name">发球</div>
+        </div>
+        <div class="tech-item" onclick="selectTech('spike', this)">
+          <div class="icon">💥</div><div class="name">扣球</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">📹 上传练习视频</div>
+      <div class="upload-box" onclick="document.getElementById('videoInput').click()">
+        <div class="icon">📤</div>
+        <div class="text">点击上传视频 或 拍摄</div>
+        <div class="hint">支持 MP4 / MOV / WebM，建议正面或侧面拍摄</div>
+        <input type="file" id="videoInput" accept="video/*" style="display:none">
+      </div>
+
+      <div class="video-wrap" id="videoWrap">
+        <video id="video" controls playsinline></video>
+        <canvas id="canvas"></canvas>
+      </div>
+
+      <button class="btn btn-primary" id="analyzeBtn" disabled onclick="analyzeVideo()">
+        🔍 开始AI分析
+      </button>
+    </div>
+
+    <div class="analyzing" id="analyzing">
+      <div class="spinner"></div>
+      <div style="font-size:14px;color:#BBD7F0;">正在分析动作，请稍候...</div>
+      <div style="font-size:12px;color:#6b8ba8;margin-top:6px;" id="analyzeProgress">0%</div>
+    </div>
+
+    <div class="result" id="result">
+      <div class="card">
+        <div class="card-title">📊 分析结果</div>
+        <div class="score-ring" id="scoreRing"><span class="num" id="scoreNum">0</span></div>
+        <div class="score-label">技术综合评分</div>
+        <div class="metric-grid" id="metricGrid"></div>
+        <div id="suggestList"></div>
+      </div>
+      <button class="btn btn-outline" onclick="resetAnalyze()">🔄 重新分析</button>
+    </div>
+  </div>
+
+  <!-- ========== 页面3：学习资源 ========== -->
+  <div class="content page" id="page-learn">
+    <div class="card">
+      <div class="card-title">📚 动作分解视频</div>
+      <div class="resource-item" onclick="alert('视频1：垫球手型分解\\n\\n① 双手叠指，拇指并拢\\n② 手臂伸直夹紧\\n③ 手腕下压，击球点在腕上10cm')">
+        <div class="ico">🤲</div>
+        <div class="info">
+          <div class="title">垫球技术分解</div>
+          <div class="desc">插、夹、提、蹬 四字要领</div>
+        </div>
+      </div>
+      <div class="resource-item" onclick="alert('视频2：传球手型分解\\n\\n① 双手呈半球形\\n② 击球点在额前上方20-30cm\\n③ 蹬地伸臂弹拨')">
+        <div class="ico">🎯</div>
+        <div class="info">
+          <div class="title">传球技术分解</div>
+          <div class="desc">手型、击球点、发力链</div>
+        </div>
+      </div>
+      <div class="resource-item" onclick="alert('视频3：发球技术分解\\n\\n① 抛球稳定\\n② 挥臂鞭打\\n③ 全掌击球')">
+        <div class="ico">🚀</div>
+        <div class="info">
+          <div class="title">发球技术分解</div>
+          <div class="desc">抛球、挥臂、击球三环节</div>
+        </div>
+      </div>
+      <div class="resource-item" onclick="alert('视频4：扣球技术分解\\n\\n① 两步助跑\\n② 起跳引臂\\n③ 挥臂鞭打、全掌包球')">
+        <div class="ico">💥</div>
+        <div class="info">
+          <div class="title">扣球技术分解</div>
+          <div class="desc">助跑、起跳、挥臂、落地</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">📖 体育通识知识</div>
+      <div class="resource-item" onclick="alert('科学热身原理：\\n\\n动态拉伸→专项激活→技术模仿\\n热身时长10-15分钟\\n心率逐渐提升至120次/分左右')">
+        <div class="ico">🔥</div>
+        <div class="info">
+          <div class="title">科学热身方法</div>
+          <div class="desc">动态拉伸 + 专项激活</div>
+        </div>
+      </div>
+      <div class="resource-item" onclick="alert('运动营养基础：\\n\\n运动前1-2h：碳水为主\\n运动中：每15-20分钟补水150ml\\n运动后30min内：碳水+蛋白质3:1')">
+        <div class="ico">🥗</div>
+        <div class="info">
+          <div class="title">运动营养补给</div>
+          <div class="desc">运动前后饮食与补水</div>
+        </div>
+      </div>
+      <div class="resource-item" onclick="alert('排球常见损伤预防：\\n\\n肩关节：充分热身、控制扣球量\\n膝关节：加强股四头肌力量\\n踝关节：佩戴护踝、强化平衡训练')">
+        <div class="ico">🩹</div>
+        <div class="info">
+          <div class="title">损伤预防知识</div>
+          <div class="desc">肩、膝、踝保护要点</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ========== 页面4：我的记录 ========== -->
+  <div class="content page" id="page-record">
+    <div class="card">
+      <div class="card-title">📈 我的成长轨迹</div>
+      <div id="recordList">
+        <div class="empty">还没有分析记录<br>上传视频开始你的第一次分析吧</div>
+      </div>
+    </div>
+    <button class="btn btn-outline" onclick="clearRecords()">🗑️ 清空所有记录</button>
+  </div>
+
+  <!-- 底部导航 -->
+  <div class="tabbar">
+    <div class="tab active" onclick="switchTab('home', this)">
+      <div class="ico">🏠</div><div class="lbl">首页</div>
+    </div>
+    <div class="tab" onclick="switchTab('analyze', this)">
+      <div class="ico">📹</div><div class="lbl">分析</div>
+    </div>
+    <div class="tab" onclick="switchTab('learn', this)">
+      <div class="ico">📚</div><div class="lbl">学习</div>
+    </div>
+    <div class="tab" onclick="switchTab('record', this)">
+      <div class="ico">📈</div><div class="lbl">记录</div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+/* ==================== 全局状态 ==================== */
+let currentTech = 'dig';
+let uploadedVideo = null;
+let poseResults = [];
+let records = JSON.parse(localStorage.getItem('vb_records') || '[]');
+
+/* ==================== 页面切换 ==================== */
+function switchTab(name, el) {
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.getElementById('page-' + name).classList.add('active');
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  if (el) el.classList.add('active');
+  else {
+    const tabs = document.querySelectorAll('.tab');
+    const map = { home: 0, analyze: 1, learn: 2, record: 3 };
+    tabs[map[name]].classList.add('active');
+  }
+  if (name === 'record') renderRecords();
+  if (name === 'home') updateHomeStats();
+}
+
+/* ==================== 技术选择 ==================== */
+function selectTech(tech, el) {
+  currentTech = tech;
+  document.querySelectorAll('.tech-item').forEach(i => i.classList.remove('active'));
+  el.classList.add('active');
+}
+
+/* ==================== 视频上传 ==================== */
+document.getElementById('videoInput').addEventListener('change', function(e) {
+  const file = e.target.files[0];
+  if (!file) return;
+  uploadedVideo = URL.createObjectURL(file);
+  const video = document.getElementById('video');
+  video.src = uploadedVideo;
+  document.getElementById('videoWrap').style.display = 'block';
+  document.getElementById('analyzeBtn').disabled = false;
+  document.getElementById('result').classList.remove('active');
+});
+
+/* ==================== MediaPipe Pose ==================== */
+const pose = new Pose({
+  locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}`
+});
+pose.setOptions({
+  modelComplexity: 1,
+  smoothLandmarks: true,
+  minDetectionConfidence: 0.5,
+  minTrackingConfidence: 0.5
+});
+pose.onResults((results) => {
+  poseResults.push(results);
+  const canvas = document.getElementById('canvas');
+  const video = document.getElementById('video');
+  const ctx = canvas.getContext('2d');
+  canvas.width = video.videoWidth || 640;
+  canvas.height = video.videoHeight || 480;
+  ctx.save();
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.drawImage(results.image, 0, 0, canvas.width, canvas.height);
+  if (results.poseLandmarks) {
+    drawConnectors(ctx, results.poseLandmarks, POSE_CONNECTIONS, {color: '#D4AF37', lineWidth: 2});
+    drawLandmarks(ctx, results.poseLandmarks, {color: '#f87171', lineWidth: 1, radius: 3});
+  }
+  ctx.restore();
+});
+
+/* ==================== 分析主流程 ==================== */
+async function analyzeVideo() {
+  if (!uploadedVideo) return;
+  const video = document.getElementById('video');
+  const loading = document.getElementById('analyzing');
+  const progressEl = document.getElementById('analyzeProgress');
+
+  loading.classList.add('active');
+  document.getElementById('result').classList.remove('active');
+  poseResults = [];
+
+  // 等待视频加载
+  await new Promise(resolve => {
+    if (video.readyState >= 2) resolve();
+    else video.onloadeddata = resolve;
+  });
+
+  const duration = video.duration || 3;
+  const fps = 5; // 每秒采样5帧
+  const totalFrames = Math.min(Math.floor(duration * fps), 50);
+
+  for (let i = 0; i < totalFrames; i++) {
+    video.currentTime = (i / fps) * (duration / totalFrames) * totalFrames / duration;
+    video.currentTime = (i / fps);
+    await new Promise(resolve => { video.onseeked = resolve; });
+    await pose.send({image: video});
+    progressEl.textContent = Math.round((i + 1) / totalFrames * 100) + '%';
+  }
+
+  loading.classList.remove('active');
+  const analysis = analyzeTechnique(poseResults, currentTech);
+  displayResults(analysis);
+
+  // 保存记录
+  if (!analysis.error) {
+    records.unshift({
+      tech: currentTech,
+      techName: { dig: '垫球', set: '传球', serve: '发球', spike: '扣球' }[currentTech],
+      score: analysis.score,
+      time: new Date().toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
+    });
+    records = records.slice(0, 50);
+    localStorage.setItem('vb_records', JSON.stringify(records));
+  }
+}
+
+/* ==================== 技术分析引擎 ==================== */
+function analyzeTechnique(frames, tech) {
+  const validFrames = frames.filter(f => f.poseLandmarks);
+  if (validFrames.length < 3) {
+    return { error: '未能识别到足够的人体姿态，请确保视频中人物完整、光线充足' };
+  }
+  const analyzers = { dig: analyzeDig, set: analyzeSet, serve: analyzeServe, spike: analyzeSpike };
+  return analyzers[tech](validFrames);
+}
+
+// 垫球分析
+function analyzeDig(frames) {
+  let armAngles = [], kneeAngles = [], heights = [];
+  frames.forEach(f => {
+    const lm = f.poseLandmarks;
+    armAngles.push(angle(lm[11], lm[13], lm[15]));
+    armAngles.push(angle(lm[12], lm[14], lm[16]));
+    kneeAngles.push(angle(lm[23], lm[25], lm[27]));
+    kneeAngles.push(angle(lm[24], lm[26], lm[28]));
+    heights.push((lm[23].y + lm[24].y) / 2);
+  });
+  const avgArm = mean(armAngles);
+  const avgKnee = mean(kneeAngles);
+  const varH = std(heights);
+  const suggestions = [];
+  let score = 70;
+  if (avgArm < 140) { suggestions.push({type:'warn', text:'⚠️ 手臂弯曲过多：垫球时两臂应夹紧伸直，加强"夹"的意识'}); score -= 10; }
+  else if (avgArm >= 155) { suggestions.push({type:'good', text:'✅ 手臂伸直度良好：符合垫球技术要领'}); score += 10; }
+  if (avgKnee > 150) { suggestions.push({type:'warn', text:'⚠️ 重心偏高：屈膝降重心，做好"蹬"的准备'}); score -= 8; }
+  else if (avgKnee >= 100 && avgKnee <= 140) { suggestions.push({type:'good', text:'✅ 重心控制良好：屈膝降重心有利于稳定垫球'}); score += 8; }
+  if (varH > 0.05) { suggestions.push({type:'warn', text:'⚠️ 身体起伏较大：垫球时重心应保持稳定'}); score -= 5; }
+  suggestions.push({type:'good', text:'💡 练习建议：对墙垫球100次/天，重点体会"插、夹、提、蹬"四字要领'});
+  return {
+    score: Math.min(100, Math.max(0, score)),
+    metrics: [
+      {label:'手臂伸直度', value: avgArm.toFixed(0) + '°'},
+      {label:'膝关节角度', value: avgKnee.toFixed(0) + '°'},
+      {label:'重心稳定性', value: (1 - varH * 10).toFixed(2)}
+    ],
+    suggestions
+  };
+}
+
+// 传球分析
+function analyzeSet(frames) {
+  let armAngles = [], handHeights = [];
+  frames.forEach(f => {
+    const lm = f.poseLandmarks;
+    armAngles.push(angle(lm[11], lm[13], lm[15]));
+    armAngles.push(angle(lm[12], lm[14], lm[16]));
+    const handY = (lm[15].y + lm[16].y) / 2;
+    handHeights.push(lm[0].y - handY);
+  });
+  const avgArm = mean(armAngles);
+  const avgHand = mean(handHeights);
+  const suggestions = [];
+  let score = 70;
+  if (avgArm < 70) { suggestions.push({type:'warn', text:'⚠️ 肘关节过屈：传球时肘部应适度外展'}); score -= 8; }
+  else if (avgArm >= 80 && avgArm <= 130) { suggestions.push({type:'good', text:'✅ 肘关节角度合理：符合传球发力要求'}); score += 10; }
+  if (avgHand < 0) { suggestions.push({type:'warn', text:'⚠️ 击球点偏低：手应在额前上方20-30cm处触球'}); score -= 10; }
+  else { suggestions.push({type:'good', text:'✅ 击球点位置良好：符合传球技术要求'}); score += 8; }
+  suggestions.push({type:'good', text:'💡 练习建议：对墙传球100次/天，体会"蹬地、伸臂、弹拨"协调发力'});
+  return {
+    score: Math.min(100, Math.max(0, score)),
+    metrics: [
+      {label:'肘关节角度', value: avgArm.toFixed(0) + '°'},
+      {label:'击球点高度', value: (avgHand * 100).toFixed(1) + 'cm'},
+      {label:'手型稳定性', value: '良好'}
+    ],
+    suggestions
+  };
+}
+
+// 发球分析
+function analyzeServe(frames) {
+  let armAngles = [], rotations = [];
+  frames.forEach(f => {
+    const lm = f.poseLandmarks;
+    armAngles.push(angle(lm[11], lm[13], lm[15]));
+    armAngles.push(angle(lm[12], lm[14], lm[16]));
+    const sA = Math.atan2(lm[12].y - lm[11].y, lm[12].x - lm[11].x);
+    const hA = Math.atan2(lm[24].y - lm[23].y, lm[24].x - lm[23].x);
+    rotations.push(Math.abs(sA - hA));
+  });
+  const avgArm = mean(armAngles);
+  const avgRot = mean(rotations);
+  const suggestions = [];
+  let score = 70;
+  if (avgArm < 150) { suggestions.push({type:'warn', text:'⚠️ 挥臂不充分：发球时手臂应充分伸展，加强鞭打动作'}); score -= 10; }
+  else { suggestions.push({type:'good', text:'✅ 挥臂充分：手臂伸展良好，有利于发力'}); score += 10; }
+  if (avgRot < 0.1) { suggestions.push({type:'warn', text:'⚠️ 转体不足：发球时应充分利用转体带动手臂'}); score -= 8; }
+  else { suggestions.push({type:'good', text:'✅ 转体协调：肩髋配合良好，发力链完整'}); score += 8; }
+  suggestions.push({type:'good', text:'💡 练习建议：每天发球50次，重点体会"抛球稳、挥臂快、击球准"'});
+  return {
+    score: Math.min(100, Math.max(0, score)),
+    metrics: [
+      {label:'挥臂角度', value: avgArm.toFixed(0) + '°'},
+      {label:'转体幅度', value: (avgRot * 100).toFixed(1)},
+      {label:'抛球稳定性', value: '待提升'}
+    ],
+    suggestions
+  };
+}
+
+// 扣球分析
+function analyzeSpike(frames) {
+  let armAngles = [], jumpH = [], kneeAngles = [];
+  frames.forEach(f => {
+    const lm = f.poseLandmarks;
+    armAngles.push(angle(lm[11], lm[13], lm[15]));
+    armAngles.push(angle(lm[12], lm[14], lm[16]));
+    kneeAngles.push(angle(lm[23], lm[25], lm[27]));
+    kneeAngles.push(angle(lm[24], lm[26], lm[28]));
+    jumpH.push((lm[27].y + lm[28].y) / 2);
+  });
+  const avgArm = mean(armAngles);
+  const maxJump = Math.max(...jumpH) - Math.min(...jumpH);
+  const avgKnee = mean(kneeAngles);
+  const suggestions = [];
+  let score = 70;
+  if (avgArm < 140) { suggestions.push({type:'warn', text:'⚠️ 引臂不充分：扣球时肘关节应高于肩，充分引臂蓄力'}); score -= 10; }
+  else { suggestions.push({type:'good', text:'✅ 引臂充分：肘高于肩，有利于鞭打发力'}); score += 10; }
+  if (maxJump < 0.05) { suggestions.push({type:'warn', text:'⚠️ 起跳高度不足：加强下肢弹跳训练，注意助跑与起跳衔接'}); score -= 8; }
+  else { suggestions.push({type:'good', text:'✅ 起跳充分：弹跳高度良好，有利于高点扣球'}); score += 8; }
+  suggestions.push({type:'good', text:'💡 练习建议：每天对墙扣球50次，体会"两步助跑、高点击球、全掌包球"'});
+  return {
+    score: Math.min(100, Math.max(0, score)),
+    metrics: [
+      {label:'引臂角度', value: avgArm.toFixed(0) + '°'},
+      {label:'起跳高度', value: (maxJump * 100).toFixed(1) + 'cm'},
+      {label:'膝关节角度', value: avgKnee.toFixed(0) + '°'}
+    ],
+    suggestions
+  };
+}
+
+/* ==================== 工具函数 ==================== */
+function angle(a, b, c) {
+  const rad = Math.atan2(c.y - b.y, c.x - b.x) - Math.atan2(a.y - b.y, a.x - b.x);
+  let deg = Math.abs(rad * 180 / Math.PI);
+  if (deg > 180) deg = 360 - deg;
+  return deg;
+}
+function mean(arr) { return arr.reduce((a, b) => a + b, 0) / arr.length; }
+function std(arr) {
+  const m = mean(arr);
+  return Math.sqrt(arr.reduce((a, b) => a + Math.pow(b - m, 2), 0) / arr.length);
+}
+
+/* ==================== 展示结果 ==================== */
+function displayResults(analysis) {
+  const resultEl = document.getElementById('result');
+  if (analysis.error) {
+    resultEl.innerHTML = `<div class="card"><div style="color:#f87171;text-align:center;padding:20px;">${analysis.error}</div></div>`;
+    resultEl.classList.add('active');
+    return;
+  }
+  const score = analysis.score;
+  const color = score >= 80 ? '#4ade80' : score >= 60 ? '#D4AF37' : '#f87171';
+  document.getElementById('scoreRing').style.background =
+    `conic-gradient(${color} ${score}%, rgba(255,255,255,0.08) 0)`;
+  document.getElementById('scoreNum').textContent = score;
+  document.getElementById('scoreNum').style.color = color;
+
+  const mg = document.getElementById('metricGrid');
+  mg.innerHTML = analysis.metrics.map(m =>
+    `<div class="metric"><div class="val">${m.value}</div><div class="lbl">${m.label}</div></div>`
+  ).join('');
+
+  const sl = document.getElementById('suggestList');
+  sl.innerHTML = analysis.suggestions.map(s =>
+    `<div class="suggest ${s.type}">${s.text}</div>`
+  ).join('');
+
+  resultEl.classList.add('active');
+  resultEl.scrollIntoView({behavior: 'smooth', block: 'start'});
+}
+
+/* ==================== 重置 ==================== */
+function resetAnalyze() {
+  document.getElementById('result').classList.remove('active');
+  document.getElementById('videoWrap').style.display = 'none';
+  document.getElementById('analyzeBtn').disabled = true;
+  uploadedVideo = null;
+  document.getElementById('videoInput').value = '';
+}
+
+/* ==================== 首页统计 ==================== */
+function updateHomeStats() {
+  document.getElementById('stat-uploads').textContent = records.length;
+  if (records.length > 0) {
+    const avg = Math.round(records.reduce((a, b) => a + b.score, 0) / records.length);
+    const best = Math.max(...records.map(r => r.score));
+    document.getElementById('stat-avg').textContent = avg;
+    document.getElementById('stat-best').textContent = best;
+  } else {
+    document.getElementById('stat-avg').textContent = '--';
+    document.getElementById('stat-best').textContent = '--';
+  }
+  const progress = Math.min(100, Math.round(records.length / 16 * 100));
+  document.getElementById('progress-fill').style.width = progress + '%';
+  document.getElementById('progress-text').textContent = Math.min(records.length, 16) + ' / 16 课时';
+}
+
+/* ==================== 记录渲染 ==================== */
+function renderRecords() {
+  const list = document.getElementById('recordList');
+  if (records.length === 0) {
+    list.innerHTML = '<div class="empty">还没有分析记录<br>上传视频开始你的第一次分析吧</div>';
+    return;
+  }
+  list.innerHTML = records.map(r =>
+    `<div class="record-item">
+      <div>
+        <div style="font-weight:bold;">${r.techName}</div>
+        <div style="font-size:11px;color:#8aa8c4;margin-top:2px;">${r.time}</div>
+      </div>
+      <div class="score">${r.score}分</div>
+    </div>`
+  ).join('');
+}
+
+function clearRecords() {
+  if (confirm('确定要清空所有记录吗？')) {
+    records = [];
+    localStorage.removeItem('vb_records');
+    renderRecords();
+    updateHomeStats();
+  }
+}
+
+/* ==================== 初始化 ==================== */
+updateHomeStats();
+</script>
+</body>
+</html>
